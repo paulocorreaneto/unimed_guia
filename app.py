@@ -8,7 +8,6 @@ Pronta para publicação no Streamlit Community Cloud (https://share.streamlit.i
 - Geração de camada de texto (ReportLab) mesclada sobre o template 'Quadrados.pdf' / 'guia dos quadradinhos.pdf' (pypdf).
 """
 
-import base64
 import io
 import textwrap
 import unicodedata
@@ -21,7 +20,6 @@ import streamlit as st
 from pypdf import PdfReader, PdfWriter
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
-import streamlit.components.v1 as components
 
 # ==============================================================================
 # DIRETÓRIOS E ARQUIVOS PADRÃO
@@ -437,6 +435,7 @@ def gerar_pdf_final(
 
         reader_overlay = PdfReader(io.BytesIO(overlay_bytes))
         if incluir_fundo:
+            # Em pypdf >= 7.0.0, a página precisa ser anexada ao PdfWriter ANTES de chamar merge_page()
             pagina_anexada = writer.add_page(pagina_base)
             pagina_anexada.merge_page(reader_overlay.pages[0])
         else:
@@ -843,10 +842,10 @@ def main() -> None:
             )
 
     # --------------------------------------------------------------------------
-    # SEÇÃO 3: GERAÇÃO DO PDF, DOWNLOAD E IMPRESSÃO DIRETA
+    # SEÇÃO 3: GERAÇÃO E DOWNLOAD DO PDF PREENCHIDO
     # --------------------------------------------------------------------------
     st.divider()
-    st.subheader("3. Gerar PDF Preenchido e Imprimir")
+    st.subheader("3. Baixar Guia Preenchida (PDF)")
 
     dados_cabecalho = {
         "matricula_medico": matricula_medico_cirurgiao,
@@ -877,8 +876,6 @@ def main() -> None:
     primeiro_nome = paciente_nome.strip().split()[0].lower() if paciente_nome.strip() else "paciente"
     nome_arquivo_saida = f"guia_unimed_{primeiro_nome}_{data_procedimento.strftime('%Y%m%d')}.pdf"
 
-     primeiro_nome = paciente_nome.strip().split()[0].lower() if paciente_nome.strip() else "paciente"
-    nome_arquivo_saida = f"guia_unimed_{primeiro_nome}_{data_procedimento.strftime('%Y%m%d')}.pdf"
     st.download_button(
         label="📥 Baixar Guia Preenchida (PDF)",
         data=pdf_bytes,
@@ -887,5 +884,7 @@ def main() -> None:
         type="primary",
         use_container_width=True,
     )
+
+
 if __name__ == "__main__":
     main()
