@@ -437,8 +437,8 @@ def gerar_pdf_final(
 
         reader_overlay = PdfReader(io.BytesIO(overlay_bytes))
         if incluir_fundo:
-            pagina_base.merge_page(reader_overlay.pages[0])
-            writer.add_page(pagina_base)
+            pagina_anexada = writer.add_page(pagina_base)
+            pagina_anexada.merge_page(reader_overlay.pages[0])
         else:
             writer.add_page(reader_overlay.pages[0])
 
