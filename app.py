@@ -877,64 +877,15 @@ def main() -> None:
     primeiro_nome = paciente_nome.strip().split()[0].lower() if paciente_nome.strip() else "paciente"
     nome_arquivo_saida = f"guia_unimed_{primeiro_nome}_{data_procedimento.strftime('%Y%m%d')}.pdf"
 
-    col_dl, col_print = st.columns([1, 1])
-    with col_dl:
-        st.download_button(
-            label="📥 Baixar Guia Preenchida (PDF)",
-            data=pdf_bytes,
-            file_name=nome_arquivo_saida,
-            mime="application/pdf",
-            type="primary",
-            use_container_width=True,
-        )
-
-    with col_print:
-        b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
-        html_print_btn = f"""
-        <div style="display:flex;align-items:center;justify-content:center;">
-            <button onclick="printPdf()" style="
-                width: 100%;
-                padding: 0.55rem 1rem;
-                background-color: #0f172a;
-                color: white;
-                border: none;
-                border-radius: 0.5rem;
-                font-size: 1rem;
-                font-weight: 600;
-                cursor: pointer;
-            ">🖨️ Abrir Janela de Impressão</button>
-        </div>
-        <script>
-        function printPdf() {{
-            const b64 = "{b64_pdf}";
-            const byteCharacters = atob(b64);
-            const byteNumbers = new Array(byteCharacters.length);
-            for (let i = 0; i < byteCharacters.length; i++) {{
-                byteNumbers[i] = byteCharacters.charCodeAt(i);
-            }}
-            const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray], {{type: 'application/pdf'}});
-            const blobUrl = URL.createObjectURL(blob);
-            const win = window.open(blobUrl, '_blank');
-            if (win) {{
-                win.onload = function() {{ win.print(); }};
-            }}
-        }}
-        </script>
-        """
-        components.html(html_print_btn, height=48)
-
-    with st.expander("👁️ Visualizar Guia PDF Preenchida na Tela", expanded=True):
-        pdf_viewer_html = f"""
-        <iframe
-            src="data:application/pdf;base64,{b64_pdf}#toolbar=1&navpanes=0&scrollbar=1"
-            width="100%"
-            height="900px"
-            style="border: 1px solid #cbd5e1; border-radius: 8px;"
-        ></iframe>
-        """
-        components.html(pdf_viewer_html, height=920)
-
-
+     primeiro_nome = paciente_nome.strip().split()[0].lower() if paciente_nome.strip() else "paciente"
+    nome_arquivo_saida = f"guia_unimed_{primeiro_nome}_{data_procedimento.strftime('%Y%m%d')}.pdf"
+    st.download_button(
+        label="📥 Baixar Guia Preenchida (PDF)",
+        data=pdf_bytes,
+        file_name=nome_arquivo_saida,
+        mime="application/pdf",
+        type="primary",
+        use_container_width=True,
+    )
 if __name__ == "__main__":
     main()
