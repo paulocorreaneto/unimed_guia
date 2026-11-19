@@ -2,10 +2,14 @@
 Aplicação Web em Streamlit para Preenchimento da Guia Médica Unimed Porto Alegre
 ("Nota de Procedimento em Hospital - Procedimentos sem Autorização Prévia" / Guia dos Quadradinhos)
 
-Pronta para publicação no Streamlit Community Cloud (https://share.streamlit.io):
-- Sem pacientes de exemplo ou dados pessoais pré-preenchidos.
-- Base CBHPM 2014 integrada (cbhpm.csv com 4.498 procedimentos).
-- Geração de camada de texto (ReportLab) mesclada sobre o template 'Quadrados.pdf' / 'guia dos quadradinhos.pdf' (pypdf).
+Características desta versão:
+- Coordenadas remapeadas e calibradas para a nova guia de alta resolução (Quadrados.pdf).
+- Fonte de preenchimento na cor PRETA.
+- Layout 100% na página principal (sem barra lateral / sidebar).
+- Qualificações no ato de 1 a 7 (1 - Médico Assistente até 7 - Outros).
+- Inclusão dinâmica de múltiplos profissionais e múltiplos procedimentos.
+- Preenchimento automático da "Matrícula do Médico" no cabeçalho exclusivamente quando o
+  "1 - Médico Assistente" estiver incluído na guia (caso contrário, permanece em branco).
 """
 
 import io
@@ -27,97 +31,117 @@ from reportlab.pdfgen import canvas
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATE_PDF_PATH = BASE_DIR / "Quadrados.pdf"
 FALLBACK_PDF_PATH = BASE_DIR / "guia dos quadradinhos.pdf"
-PACIENTES_CSV_PATH = BASE_DIR / "pacientes.csv"
 CBHPM_CSV_PATH = BASE_DIR / "cbhpm.csv"
 
 A4_WIDTH, A4_HEIGHT = A4  # (595.2756, 841.8898)
 
+OPCOES_QUALIFICACAO: Dict[str, str] = {
+    "1": "1 - Médico Assistente",
+    "2": "2 - Primeiro Auxílio",
+    "3": "3 - Segundo Auxílio",
+    "4": "4 - Terceiro Auxílio",
+    "5": "5 - Anestesiologista",
+    "6": "6 - Acompanhamento ou Avaliação",
+    "7": "7 - Outros",
+}
+
 
 # ==============================================================================
-# DICIONÁRIO DE COORDENADAS CALIBRADAS (REPORTLAB)
+# DICIONÁRIO DE COORDENADAS CALIBRADAS PARA A NOVA GUIA (REPORTLAB)
 # ==============================================================================
 OFFSET_GLOBAL_X = 0.0
 OFFSET_GLOBAL_Y = 0.0
 
 COORDENADAS: Dict[str, Any] = {
+    # --------------------------------------------------------------------------
+    # 1. CABEÇALHO DO FORMULÁRIO (Repetido em todas as páginas geradas)
+    # --------------------------------------------------------------------------
     "CABECALHO": {
-        # Matrícula do Médico Cirurgião Principal (Qualificação 1) - 4 quadradinhos + 1 dígito: [0][1][2][3]-[4]
-        "matricula_medico_boxes_x": [65.0, 81.8, 98.5, 115.3, 142.5],
-        "matricula_medico_y": 674.5,
+        # Matrícula do Médico (Preenchida apenas se houver 1 - Médico Assistente na guia)
+        "matricula_medico_boxes_x": [63.2, 79.9, 96.6, 113.4, 139.5],
+        "matricula_medico_y": 691.5,
 
         # Data do Procedimento (DD / MM / AAAA)
-        "data_dia": (194.0, 673.5),
-        "data_mes": (226.0, 673.5),
-        "data_ano": (262.0, 673.5),
+        "data_dia": (191.5, 689.5),
+        "data_mes": (223.5, 689.5),
+        "data_ano": (256.5, 689.5),
 
         # Hora Inicial (HH : MM)
-        "hora_inicial_hh": (391.0, 679.5),
-        "hora_inicial_mm": (413.0, 679.5),
+        "hora_inicial_hh": (382.0, 696.5),
+        "hora_inicial_mm": (415.0, 696.5),
 
         # Hora Final (HH : MM)
-        "hora_final_hh": (391.0, 661.5),
-        "hora_final_mm": (413.0, 661.5),
+        "hora_final_hh": (382.0, 679.0),
+        "hora_final_mm": (415.0, 679.0),
 
         # Hospital
-        "hospital": (106.0, 641.5),
+        "hospital": (98.0, 658.0),
 
-        # Matrícula do Paciente / Beneficiário (17 quadradinhos)
-        "matricula_paciente_x_inicial": 112.3,
-        "matricula_paciente_y": 622.5,
-        "matricula_paciente_passo_x": 16.588,
+        # Matrícula do Paciente / Beneficiário (Grade de 17 quadradinhos)
+        "matricula_paciente_x_inicial": 108.34,
+        "matricula_paciente_y": 636.8,
+        "matricula_paciente_passo_x": 16.676,
 
         # Nome do Beneficiário (Paciente)
-        "beneficiario": (120.0, 603.5),
+        "beneficiario": (116.0, 619.0),
     },
+
+    # --------------------------------------------------------------------------
+    # 2. COLUNAS HORIZONTAIS (EIXO X) DAS TABELAS DE PROCEDIMENTOS
+    # --------------------------------------------------------------------------
     "COLUNAS_TABELA_X": {
-        "descricao_x": 66.0,
-        "amb_centro_x": 245.0,
-        "quant_centro_x": 296.0,
-        "perc_centro_x": 343.5,
-        "data_hora_1_x": 148.0,
+        "descricao_x": 60.0,
+        "amb_centro_x": 240.0,
+        "quant_centro_x": 293.0,
+        "perc_centro_x": 340.0,
+        "data_hora_1_x": 141.0,
         "data_hora_2_x": 352.0,
         "carimbo_centro_x": 451.5,
     },
+
+    # --------------------------------------------------------------------------
+    # 3. COORDENADAS DE CADA UM DOS 4 BLOCOS DE TABELA POR PÁGINA
+    # --------------------------------------------------------------------------
     "BLOCOS_TABELA": [
         # --- BLOCO 1 (1ª Tabela - Topo) ---
         {
-            "qualificacao_x": 168.0,
-            "matricula_exec_boxes_x": [276.8, 293.4, 310.0, 326.6, 351.5],
-            "qualificacao_y": 542.5,
-            "linha_1_y": 503.0,
-            "linha_2_y": 484.0,
-            "data_hora_y": 462.5,
-            "carimbo_y": 509.0,
+            "qualificacao_x": 163.0,
+            "matricula_exec_boxes_x": [272.8, 289.5, 306.2, 322.9, 348.5],
+            "qualificacao_y": 556.5,
+            "linha_1_y": 515.0,
+            "linha_2_y": 496.0,
+            "data_hora_y": 474.0,
+            "carimbo_y": 521.0,
         },
         # --- BLOCO 2 (2ª Tabela) ---
         {
-            "qualificacao_x": 169.0,
-            "matricula_exec_boxes_x": [277.8, 294.4, 311.0, 327.6, 352.5],
-            "qualificacao_y": 415.5,
-            "linha_1_y": 376.0,
-            "linha_2_y": 357.0,
-            "data_hora_y": 335.5,
-            "carimbo_y": 382.0,
+            "qualificacao_x": 163.0,
+            "matricula_exec_boxes_x": [272.8, 289.5, 306.2, 322.9, 348.5],
+            "qualificacao_y": 424.5,
+            "linha_1_y": 383.0,
+            "linha_2_y": 364.0,
+            "data_hora_y": 342.0,
+            "carimbo_y": 389.0,
         },
         # --- BLOCO 3 (3ª Tabela) ---
         {
-            "qualificacao_x": 169.5,
-            "matricula_exec_boxes_x": [278.3, 294.9, 311.5, 328.1, 353.0],
-            "qualificacao_y": 288.5,
-            "linha_1_y": 249.0,
-            "linha_2_y": 230.0,
-            "data_hora_y": 208.5,
-            "carimbo_y": 255.0,
+            "qualificacao_x": 163.0,
+            "matricula_exec_boxes_x": [272.8, 289.5, 306.2, 322.9, 348.5],
+            "qualificacao_y": 290.0,
+            "linha_1_y": 248.5,
+            "linha_2_y": 229.5,
+            "data_hora_y": 207.5,
+            "carimbo_y": 254.5,
         },
         # --- BLOCO 4 (4ª Tabela - Rodapé) ---
         {
-            "qualificacao_x": 170.0,
-            "matricula_exec_boxes_x": [278.8, 295.4, 312.0, 328.6, 353.5],
-            "qualificacao_y": 162.5,
-            "linha_1_y": 123.0,
-            "linha_2_y": 104.0,
-            "data_hora_y": 82.5,
-            "carimbo_y": 129.0,
+            "qualificacao_x": 163.0,
+            "matricula_exec_boxes_x": [272.8, 289.5, 306.2, 322.9, 348.5],
+            "qualificacao_y": 157.0,
+            "linha_1_y": 115.5,
+            "linha_2_y": 96.5,
+            "data_hora_y": 74.5,
+            "carimbo_y": 121.5,
         },
     ],
 }
@@ -128,7 +152,6 @@ COORDENADAS: Dict[str, Any] = {
 # ==============================================================================
 
 def remover_acentos(texto: str) -> str:
-    """Remove acentos e converte para minúsculas para busca insensível a acentuação."""
     if not texto:
         return ""
     nfkd = unicodedata.normalize("NFKD", str(texto))
@@ -137,7 +160,6 @@ def remover_acentos(texto: str) -> str:
 
 @st.cache_data
 def carregar_cbhpm(caminho_csv: Path) -> pd.DataFrame:
-    """Carrega o catálogo de procedimentos CBHPM (codigo, descricao) e cria índice de busca."""
     if caminho_csv.exists():
         df = pd.read_csv(caminho_csv, dtype=str)
         if {"codigo", "descricao"}.issubset(df.columns):
@@ -150,12 +172,10 @@ def carregar_cbhpm(caminho_csv: Path) -> pd.DataFrame:
             )
             return df
 
-    df = pd.DataFrame(columns=["codigo", "descricao", "label", "busca_norm"])
-    return df
+    return pd.DataFrame(columns=["codigo", "descricao", "label", "busca_norm"])
 
 
 def filtrar_cbhpm(df_cbhpm: pd.DataFrame, termo_busca: str, capitulo: str = "Todos") -> pd.DataFrame:
-    """Filtra a tabela CBHPM por capítulo e por palavras-chave sem acentos."""
     df_filtrado = df_cbhpm
     if capitulo != "Todos":
         prefixo = capitulo[0] + "."
@@ -174,11 +194,10 @@ def filtrar_cbhpm(df_cbhpm: pd.DataFrame, termo_busca: str, capitulo: str = "Tod
 
 
 # ==============================================================================
-# LÓGICA DE NEGÓCIO E PAGINAÇÃO
+# LÓGICA DE NEGÓCIO E PAGINAÇÃO POR PROFISSIONAL E PROCEDIMENTO
 # ==============================================================================
 
 def formatar_percentual(base_calculo: str, urgencia: bool) -> str:
-    """Concatena dinamicamente o campo 'Perc.' ('100%', '70%+30%', etc.)."""
     base_limpa = base_calculo.strip()
     if urgencia:
         return f"{base_limpa}+30%"
@@ -189,21 +208,62 @@ def dividir_em_chunks(lista: List[Any], tamanho: int) -> List[List[Any]]:
     return [lista[i : i + tamanho] for i in range(0, len(lista), tamanho)]
 
 
-def paginar_procedimentos(procedimentos: List[Dict[str, Any]]) -> List[List[List[Dict[str, Any]]]]:
+def montar_tabelas_por_profissional(
+    profissionais: List[Dict[str, Any]],
+    procedimentos: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
     """
-    Regra Crítica de Paginação:
-    - Cada tabela comporta até 2 procedimentos (chunks de 2 em 2).
-    - Cada página comporta até 4 tabelas (máximo de 8 procedimentos por página).
+    Para cada profissional incluído na guia, agrupa os procedimentos realizados de 2 em 2
+    (pois cada tabela da guia comporta até 2 procedimentos de um mesmo profissional).
+    Retorna a lista linear de tabelas que serão distribuídas de 4 em 4 por página.
     """
-    if not procedimentos:
-        return [[[]]]
-    tabelas = dividir_em_chunks(procedimentos, 2)
-    paginas = dividir_em_chunks(tabelas, 4)
-    return paginas
+    procs_validos = [
+        p for p in procedimentos if str(p.get("codigo", "")).strip() or str(p.get("descricao", "")).strip()
+    ]
+
+    tabelas: List[Dict[str, Any]] = []
+    if not procs_validos or not profissionais:
+        return tabelas
+
+    for prof in profissionais:
+        chunks_2 = dividir_em_chunks(procs_validos, 2)
+        for chunk in chunks_2:
+            tabelas.append(
+                {
+                    "qualificacao": str(prof.get("qualificacao", "1")).strip(),
+                    "matricula_executante": str(prof.get("matricula", "")).strip(),
+                    "nome_crm": str(prof.get("nome_crm", "")).strip(),
+                    "procedimentos": chunk,
+                }
+            )
+
+    return tabelas
+
+
+def paginar_tabelas(tabelas: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+    """Agrupa as tabelas de 4 em 4 por folha da guia."""
+    if not tabelas:
+        return [[]]
+    return dividir_em_chunks(tabelas, 4)
+
+
+def obter_matricula_medico_assistente(profissionais: List[Dict[str, Any]]) -> str:
+    """
+    Regra do Cabeçalho:
+    Se houver um profissional com Qualificação '1' (1 - Médico Assistente) incluído na guia,
+    retorna a matrícula dele para preencher o campo 'Matrícula do Médico' no cabeçalho.
+    Caso contrário, retorna string vazia (deixa o campo em branco).
+    """
+    for prof in profissionais:
+        if str(prof.get("qualificacao", "")).strip() == "1":
+            mat = str(prof.get("matricula", "")).strip()
+            if mat:
+                return mat
+    return ""
 
 
 # ==============================================================================
-# GERAÇÃO DO OVERLAY EM REPORTLAB E MESCLAGEM COM PYPDF
+# GERAÇÃO DO OVERLAY EM REPORTLAB (FONTE PRETA) E MESCLAGEM COM PYPDF
 # ==============================================================================
 
 def desenhar_caixas_matricula_5_digitos(
@@ -253,8 +313,7 @@ def desenhar_descricao_ajustada(
 
 def criar_overlay_pagina(
     dados_cabecalho: Dict[str, str],
-    dados_profissional: Dict[str, str],
-    tabelas_da_pagina: List[List[Dict[str, Any]]],
+    tabelas_da_pagina: List[Dict[str, Any]],
     page_width: float,
     page_height: float,
     dx_ajuste: float = 0.0,
@@ -270,11 +329,12 @@ def criar_overlay_pagina(
     dx = OFFSET_GLOBAL_X + dx_ajuste
     dy = OFFSET_GLOBAL_Y + dy_ajuste
 
-    c.setFillColorRGB(0.0, 0.1, 0.55)
+    # Cor da fonte: PRETO PURO conforme solicitado
+    c.setFillColorRGB(0.0, 0.0, 0.0)
 
     cab_coords = COORDENADAS["CABECALHO"]
 
-    # 1. Matrícula do Médico (Cirurgião Principal)
+    # 1. Matrícula do Médico no Cabeçalho (somente se 1 - Médico Assistente estiver incluído)
     desenhar_caixas_matricula_5_digitos(
         c,
         dados_cabecalho.get("matricula_medico", ""),
@@ -328,29 +388,31 @@ def criar_overlay_pagina(
         dados_cabecalho.get("beneficiario", ""),
     )
 
-    # 7. Blocos de Tabela (até 4 por página)
+    # 7. Blocos de Tabela (até 4 tabelas por página)
     col_x = COORDENADAS["COLUNAS_TABELA_X"]
     blocos_coords = COORDENADAS["BLOCOS_TABELA"]
     data_hora_espelhada = f"{data_str} {hora_ini}".strip()
 
-    for idx_bloco, proc_lista_bloco in enumerate(tabelas_da_pagina):
-        # Filtra apenas procedimentos que tenham código ou descrição preenchidos
-        procs_preenchidos = [
-            p for p in proc_lista_bloco if str(p.get("codigo", "")).strip() or str(p.get("descricao", "")).strip()
-        ]
-        if idx_bloco >= len(blocos_coords) or not procs_preenchidos:
+    for idx_bloco, dados_tabela in enumerate(tabelas_da_pagina):
+        if idx_bloco >= len(blocos_coords) or not dados_tabela:
+            continue
+
+        procs_preenchidos = dados_tabela.get("procedimentos", [])
+        if not procs_preenchidos:
             continue
 
         b_coord = blocos_coords[idx_bloco]
 
-        qual_bloco = str(procs_preenchidos[0].get("qualificacao", dados_profissional.get("qualificacao", "")))
+        # Qualificação no ato deste profissional
+        qual_bloco = str(dados_tabela.get("qualificacao", ""))
         if qual_bloco:
             c.setFont("Helvetica-Bold", 9.5)
             c.drawCentredString(b_coord["qualificacao_x"] + dx, b_coord["qualificacao_y"] + dy, qual_bloco)
 
+        # Matrícula do profissional executante desta tabela
         desenhar_caixas_matricula_5_digitos(
             c,
-            dados_profissional.get("matricula_executante", ""),
+            dados_tabela.get("matricula_executante", ""),
             b_coord["matricula_exec_boxes_x"],
             b_coord["qualificacao_y"],
             dx,
@@ -358,6 +420,7 @@ def criar_overlay_pagina(
             tamanho_fonte=9.5,
         )
 
+        # Até 2 procedimentos na tabela
         linhas_y = [b_coord["linha_1_y"], b_coord["linha_2_y"]]
         for idx_linha, proc in enumerate(procs_preenchidos[:2]):
             y_linha = linhas_y[idx_linha]
@@ -380,12 +443,14 @@ def criar_overlay_pagina(
             c.setFont("Helvetica-Bold", 6.5)
             c.drawCentredString(col_x["perc_centro_x"] + dx, y_linha + dy, str(proc.get("percentual", "100%")))
 
+        # Data / Hora Inicial abaixo da tabela
         c.setFont("Helvetica", 7.0)
         c.drawString(col_x["data_hora_1_x"] + dx, b_coord["data_hora_y"] + dy, data_hora_espelhada)
         if len(procs_preenchidos) >= 2:
             c.drawString(col_x["data_hora_2_x"] + dx, b_coord["data_hora_y"] + dy, data_hora_espelhada)
 
-        texto_carimbo = dados_profissional.get("nome_crm", "").strip()
+        # Carimbo e Assinatura deste profissional
+        texto_carimbo = dados_tabela.get("nome_crm", "").strip()
         if texto_carimbo:
             c.setFont("Helvetica-Bold", 6.8)
             if " - " in texto_carimbo:
@@ -407,16 +472,17 @@ def criar_overlay_pagina(
 def gerar_pdf_final(
     caminho_template: Path,
     dados_cabecalho: Dict[str, str],
-    dados_profissional: Dict[str, str],
+    profissionais: List[Dict[str, Any]],
     procedimentos: List[Dict[str, Any]],
     dx_ajuste: float = 0.0,
     dy_ajuste: float = 0.0,
     incluir_fundo: bool = True,
 ) -> bytes:
-    paginas_procedimentos = paginar_procedimentos(procedimentos)
+    todas_tabelas = montar_tabelas_por_profissional(profissionais, procedimentos)
+    paginas_tabelas = paginar_tabelas(todas_tabelas)
     writer = PdfWriter()
 
-    for tabelas_da_pagina in paginas_procedimentos:
+    for tabelas_da_pagina in paginas_tabelas:
         reader_template = PdfReader(str(caminho_template))
         pagina_base = reader_template.pages[0]
 
@@ -425,7 +491,6 @@ def gerar_pdf_final(
 
         overlay_bytes = criar_overlay_pagina(
             dados_cabecalho=dados_cabecalho,
-            dados_profissional=dados_profissional,
             tabelas_da_pagina=tabelas_da_pagina,
             page_width=largura_real,
             page_height=altura_real,
@@ -435,7 +500,6 @@ def gerar_pdf_final(
 
         reader_overlay = PdfReader(io.BytesIO(overlay_bytes))
         if incluir_fundo:
-            # Em pypdf >= 7.0.0, a página precisa ser anexada ao PdfWriter ANTES de chamar merge_page()
             pagina_anexada = writer.add_page(pagina_base)
             pagina_anexada.merge_page(reader_overlay.pages[0])
         else:
@@ -448,7 +512,7 @@ def gerar_pdf_final(
 
 
 # ==============================================================================
-# INTERFACE WEB NO STREAMLIT (UI)
+# INTERFACE WEB NO STREAMLIT (100% NA PÁGINA PRINCIPAL — SEM BARRA LATERAL)
 # ==============================================================================
 
 def main() -> None:
@@ -456,12 +520,13 @@ def main() -> None:
         page_title="Guia Médica Unimed - Preenchimento Digital",
         page_icon="🩺",
         layout="wide",
+        initial_sidebar_state="collapsed",
     )
 
     st.title("🩺 Preenchimento de Guia Médica — Unimed Porto Alegre")
     st.caption(
         "**Nota de Procedimento em Hospital (Procedimentos sem Autorização Prévia)** • "
-        "Base CBHPM 2014 integrada (4.498 procedimentos) • Mapeamento direto sobre `Quadrados.pdf`"
+        "Base CBHPM 2014 integrada (4.498 procedimentos)"
     )
 
     caminho_template = TEMPLATE_PDF_PATH if TEMPLATE_PDF_PATH.exists() else FALLBACK_PDF_PATH
@@ -473,7 +538,17 @@ def main() -> None:
 
     df_cbhpm = carregar_cbhpm(CBHPM_CSV_PATH)
 
-    # Inicializa a lista dinâmica de procedimentos em branco (sem pré-preenchimento)
+    # Inicializa lista dinâmica de profissionais no st.session_state
+    if "profissionais" not in st.session_state:
+        st.session_state.profissionais = [
+            {
+                "qualificacao": "1",
+                "matricula": "",
+                "nome_crm": "",
+            }
+        ]
+
+    # Inicializa lista dinâmica de procedimentos no st.session_state
     if "procedimentos" not in st.session_state:
         st.session_state.procedimentos = [
             {
@@ -486,91 +561,10 @@ def main() -> None:
         ]
 
     # --------------------------------------------------------------------------
-    # BARRA LATERAL: DADOS DO PROFISSIONAL EXECUTANTE E CALIBRAÇÃO FINA
-    # --------------------------------------------------------------------------
-    with st.sidebar:
-        st.header("👨‍⚕️ Profissional Executante")
-        st.markdown("Dados impressos no cabeçalho de cada tabela e no quadro **Carimbo e Assinatura**.")
-
-        opcoes_qualificacao = {
-            "1": "1 - Cirurgião Principal",
-            "2": "2 - Primeiro Auxílio",
-            "3": "3 - Segundo Auxílio",
-            "4": "4 - Terceiro Auxílio",
-            "5": "5 - Anestesista",
-        }
-        qualificacao_padrao = st.selectbox(
-            "Qualificação no Ato",
-            options=list(opcoes_qualificacao.keys()),
-            format_func=lambda k: opcoes_qualificacao[k],
-            index=0,
-        )
-
-        matricula_executante = st.text_input(
-            "Matrícula Unimed do Executante (5 dígitos)",
-            value="",
-            max_chars=6,
-            placeholder="Ex: 0000-0",
-        )
-
-        nome_crm_executante = st.text_input(
-            "Nome do Médico e CRM (Carimbo e Assinatura)",
-            value="",
-            placeholder="Ex: Nome do Médico - CRM 00000",
-            help="Use ' - ' para separar a 1ª linha (Nome) da 2ª linha (CRM) dentro do quadro de carimbo.",
-        )
-
-        st.divider()
-        st.subheader("🖨️ Modo de Impressão")
-        modo_fundo = st.radio(
-            "Plano de fundo do PDF:",
-            options=["COM_FUNDO", "SO_TEXTO"],
-            format_func=lambda m: (
-                "Guia Original Quadrados.pdf + Dados"
-                if m == "COM_FUNDO"
-                else "Somente Textos (Imprimir sobre guia física)"
-            ),
-            index=0,
-        )
-
-        st.divider()
-        st.subheader("🎯 Ajuste Fino de Impressão (Opcional)")
-        dx_ajuste = st.slider("Deslocamento Horizontal (Eixo X)", -25.0, 25.0, 0.0, 0.5)
-        dy_ajuste = st.slider("Deslocamento Vertical (Eixo Y)", -25.0, 25.0, 0.0, 0.5)
-
-    # --------------------------------------------------------------------------
-    # SEÇÃO 1: DADOS DO CABEÇALHO (GERAL) — SEM PRÉ-PREENCHIMENTO
+    # SEÇÃO 1: DADOS DO CABEÇALHO (GERAL)
     # --------------------------------------------------------------------------
     st.subheader("1. Dados do Cabeçalho (Geral)")
     with st.container(border=True):
-        col_c1, col_c2, col_c3, col_c4 = st.columns([1.3, 1.1, 1.0, 1.0])
-
-        with col_c1:
-            matricula_medico_cirurgiao = st.text_input(
-                "Matrícula do Médico (Cirurgião Principal - Qualif. 1)",
-                value="",
-                max_chars=6,
-                placeholder="Ex: 0000-0",
-            )
-        with col_c2:
-            data_procedimento = st.date_input(
-                "Data do Procedimento",
-                value=date.today(),
-                format="DD/MM/YYYY",
-            )
-        with col_c3:
-            hora_inicial = st.time_input(
-                "Hora Inicial",
-                value=time(8, 0),
-                step=300,
-            )
-        with col_c4:
-            hora_final = st.time_input(
-                "Hora Final",
-                value=time(9, 0),
-                step=300,
-            )
-
         col_h1, col_h2, col_h3 = st.columns([1.4, 1.6, 1.2])
         with col_h1:
             hospitais_poa = [
@@ -607,13 +601,124 @@ def main() -> None:
                 placeholder="Até 17 dígitos",
             )
 
+        col_c1, col_c2, col_c3, col_c4 = st.columns([1.1, 1.0, 1.0, 1.4])
+        with col_c1:
+            data_procedimento = st.date_input(
+                "Data do Procedimento",
+                value=date.today(),
+                format="DD/MM/YYYY",
+            )
+        with col_c2:
+            hora_inicial = st.time_input(
+                "Hora Inicial",
+                value=time(8, 0),
+                step=300,
+            )
+        with col_c3:
+            hora_final = st.time_input(
+                "Hora Final",
+                value=time(9, 0),
+                step=300,
+            )
+
+        # A matrícula do médico no cabeçalho reflete automaticamente o 1 - Médico Assistente (se incluído)
+        with col_c4:
+            mat_cabecalho_preview = obter_matricula_medico_assistente(st.session_state.profissionais)
+            st.text_input(
+                "Matrícula do Médico no Cabeçalho (Automático)",
+                value=mat_cabecalho_preview if mat_cabecalho_preview else "Em branco (sem Médico Assistente)",
+                disabled=True,
+                help="Preenchido automaticamente com a matrícula do '1 - Médico Assistente'. Caso não seja incluído na guia, fica em branco no PDF.",
+            )
+
     data_formatada = data_procedimento.strftime("%d/%m/%Y")
     hora_ini_formatada = hora_inicial.strftime("%H:%M")
     hora_fim_formatada = hora_final.strftime("%H:%M")
 
     # --------------------------------------------------------------------------
-    # BUSCADOR RÁPIDO DA TABELA CBHPM COMPLETA (4.498 PROCEDIMENTOS)
+    # SEÇÃO 2: PROFISSIONAIS EXECUTANTES (DINÂMICO NA PÁGINA PRINCIPAL)
     # --------------------------------------------------------------------------
+    st.subheader("2. Profissionais Executantes (Qualificação, Matrícula e Carimbo)")
+
+    col_p_add, col_p_rem, col_p_info = st.columns([1.3, 1.3, 2.4])
+    with col_p_add:
+        if st.button("➕ Adicionar Profissional", use_container_width=True, type="primary"):
+            prox_qual = "2" if len(st.session_state.profissionais) == 1 else "5"
+            st.session_state.profissionais.append(
+                {
+                    "qualificacao": prox_qual,
+                    "matricula": "",
+                    "nome_crm": "",
+                }
+            )
+            st.rerun()
+    with col_p_rem:
+        if st.button(
+            "🗑️ Remover Último Profissional",
+            use_container_width=True,
+            disabled=len(st.session_state.profissionais) <= 1,
+        ):
+            st.session_state.profissionais.pop()
+            st.rerun()
+    with col_p_info:
+        st.caption(
+            "ℹ️ Se o **1 - Médico Assistente** for incluído abaixo, sua matrícula preencherá automaticamente "
+            "o campo *Matrícula do Médico* no topo da guia."
+        )
+
+    profissionais_processados: List[Dict[str, Any]] = []
+    chaves_qual = list(OPCOES_QUALIFICACAO.keys())
+
+    for idx_prof, prof_item in enumerate(st.session_state.profissionais):
+        with st.container(border=True):
+            st.markdown(f"**Profissional #{idx_prof + 1}**")
+            cp_qual, cp_mat, cp_nome = st.columns([1.4, 1.0, 2.2])
+
+            with cp_qual:
+                qual_atual = str(prof_item.get("qualificacao", "1"))
+                idx_q = chaves_qual.index(qual_atual) if qual_atual in chaves_qual else 0
+                qual_sel = st.selectbox(
+                    "Qualificação no Ato",
+                    options=chaves_qual,
+                    format_func=lambda k: OPCOES_QUALIFICACAO[k],
+                    index=idx_q,
+                    key=f"prof_qual_{idx_prof}",
+                )
+                st.session_state.profissionais[idx_prof]["qualificacao"] = qual_sel
+
+            with cp_mat:
+                mat_sel = st.text_input(
+                    "Matrícula Unimed (5 dígitos)",
+                    value=str(prof_item.get("matricula", "")),
+                    max_chars=6,
+                    placeholder="Ex: 0000-0",
+                    key=f"prof_mat_{idx_prof}",
+                )
+                st.session_state.profissionais[idx_prof]["matricula"] = mat_sel
+
+            with cp_nome:
+                nome_crm_sel = st.text_input(
+                    "Nome do Médico e CRM (Carimbo e Assinatura)",
+                    value=str(prof_item.get("nome_crm", "")),
+                    placeholder="Ex: Nome do Médico - CRM 00000",
+                    help="Use ' - ' para separar a 1ª linha (Nome) da 2ª linha (CRM) no carimbo.",
+                    key=f"prof_nome_{idx_prof}",
+                )
+                st.session_state.profissionais[idx_prof]["nome_crm"] = nome_crm_sel
+
+            profissionais_processados.append(
+                {
+                    "qualificacao": qual_sel,
+                    "matricula": mat_sel,
+                    "nome_crm": nome_crm_sel,
+                }
+            )
+
+    # --------------------------------------------------------------------------
+    #SEÇÃO 3: PROCEDIMENTOS REALIZADOS (CBHPM)
+    # --------------------------------------------------------------------------
+    st.subheader("3. Procedimentos Realizados (CBHPM)")
+
     with st.expander("🔍 Localizar Procedimentos no Catálogo CBHPM (4.498 Procedimentos)", expanded=False):
         col_f1, col_f2 = st.columns([2.5, 1.5])
         with col_f1:
@@ -679,16 +784,7 @@ def main() -> None:
                         )
                     st.rerun()
 
-    # --------------------------------------------------------------------------
-    # SEÇÃO 2: PROCEDIMENTOS CBHPM (DINÂMICO COM ST.SESSION_STATE)
-    # --------------------------------------------------------------------------
-    st.subheader("2. Procedimentos Realizados (CBHPM)")
-
-    total_procs = len(st.session_state.procedimentos)
-    total_tabelas = (total_procs + 1) // 2
-    total_paginas = (total_procs + 7) // 8
-
-    col_btn_add, col_btn_rem, col_metric = st.columns([1.2, 1.2, 2.6])
+    col_btn_add, col_btn_rem, col_metric = st.columns([1.3, 1.3, 2.4])
     with col_btn_add:
         if st.button("➕ Adicionar Procedimento", use_container_width=True, type="primary"):
             st.session_state.procedimentos.append(
@@ -705,17 +801,12 @@ def main() -> None:
             st.rerun()
     with col_btn_rem:
         if st.button(
-            "🗑️ Remover Último",
+            "🗑️ Remover Último Procedimento",
             use_container_width=True,
             disabled=len(st.session_state.procedimentos) <= 1,
         ):
             st.session_state.procedimentos.pop()
             st.rerun()
-    with col_metric:
-        st.markdown(
-            f"📄 **Resumo de Paginação:** `{total_procs}` procedimento(s) → "
-            f"`{total_tabelas}` tabela(s) → **`{total_paginas}` página(s) PDF**"
-        )
 
     opcoes_base = {
         "100%": "100% (Procedimento Principal)",
@@ -726,14 +817,8 @@ def main() -> None:
     procedimentos_processados: List[Dict[str, Any]] = []
 
     for idx, item in enumerate(st.session_state.procedimentos):
-        num_linha = (idx % 2) + 1
-        num_pagina = (idx // 8) + 1
-        num_tabela_pag = ((idx // 2) % 4) + 1
-
         with st.container(border=True):
-            st.markdown(
-                f"**Procedimento #{idx + 1}** — *Página {num_pagina} | Tabela {num_tabela_pag} | Linha {num_linha}*"
-            )
+            st.markdown(f"**Procedimento #{idx + 1}**")
 
             c_filtro, c_proc = st.columns([1.5, 3.5])
             with c_filtro:
@@ -754,7 +839,6 @@ def main() -> None:
             if label_salvo and label_salvo not in labels_filtrados:
                 labels_filtrados.insert(1, label_salvo)
 
-            # Se o usuário digitou algo no filtro, pré-seleciona o 1º resultado correspondente
             if filtro_item.strip() and len(labels_filtrados) > 1:
                 idx_box = 1
             elif label_salvo in labels_filtrados:
@@ -837,18 +921,47 @@ def main() -> None:
                     "descricao": descricao_cbhpm,
                     "quantidade": qtd,
                     "percentual": perc_final,
-                    "qualificacao": qualificacao_padrao,
                 }
             )
 
+    tabelas_geradas = montar_tabelas_por_profissional(profissionais_processados, procedimentos_processados)
+    total_tabelas = len(tabelas_geradas)
+    total_paginas = max(1, (total_tabelas + 3) // 4)
+    with col_metric:
+        st.markdown(
+            f"📄 **Paginação:** `{len(profissionais_processados)}` profissional(is) × "
+            f"`{len(procedimentos_processados)}` proc(s) → `{total_tabelas}` tabela(s) → **`{total_paginas}` página(s)**"
+        )
+
     # --------------------------------------------------------------------------
-    # SEÇÃO 3: GERAÇÃO E DOWNLOAD DO PDF PREENCHIDO
+    # SEÇÃO 4: GERAÇÃO E DOWNLOAD DO PDF PREENCHIDO
     # --------------------------------------------------------------------------
     st.divider()
-    st.subheader("3. Baixar Guia Preenchida (PDF)")
+    st.subheader("4. Baixar Guia Preenchida (PDF)")
+
+    with st.expander("⚙️ Opções Avançadas de Impressão e Ajuste Fino (Opcional)", expanded=False):
+        c_opt1, c_opt2, c_opt3 = st.columns([1.6, 1.2, 1.2])
+        with c_opt1:
+            modo_fundo = st.radio(
+                "Plano de fundo do PDF:",
+                options=["COM_FUNDO", "SO_TEXTO"],
+                format_func=lambda m: (
+                    "Guia Original Quadrados.pdf + Dados (Folha Branca)"
+                    if m == "COM_FUNDO"
+                    else "Somente Textos (Imprimir sobre guia física)"
+                ),
+                index=0,
+            )
+        with c_opt2:
+            dx_ajuste = st.slider("Deslocamento Horizontal (Eixo X)", -25.0, 25.0, 0.0, 0.5)
+        with c_opt3:
+            dy_ajuste = st.slider("Deslocamento Vertical (Eixo Y)", -25.0, 25.0, 0.0, 0.5)
+
+    # Regra do Cabeçalho: Matrícula do Médico só é preenchida se houver 1 - Médico Assistente
+    matricula_cabecalho_final = obter_matricula_medico_assistente(profissionais_processados)
 
     dados_cabecalho = {
-        "matricula_medico": matricula_medico_cirurgiao,
+        "matricula_medico": matricula_cabecalho_final,
         "data_procedimento": data_formatada,
         "hora_inicial": hora_ini_formatada,
         "hora_final": hora_fim_formatada,
@@ -857,16 +970,10 @@ def main() -> None:
         "beneficiario": paciente_nome,
     }
 
-    dados_profissional = {
-        "qualificacao": qualificacao_padrao,
-        "matricula_executante": matricula_executante,
-        "nome_crm": nome_crm_executante,
-    }
-
     pdf_bytes = gerar_pdf_final(
         caminho_template=caminho_template,
         dados_cabecalho=dados_cabecalho,
-        dados_profissional=dados_profissional,
+        profissionais=profissionais_processados,
         procedimentos=procedimentos_processados,
         dx_ajuste=dx_ajuste,
         dy_ajuste=dy_ajuste,
